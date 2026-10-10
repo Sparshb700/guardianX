@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10141a">
+<title>GuardianX</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header>
+  <h1>GUARDIANX</h1>
+  <nav><a href="/admin">Admin</a></nav>
+</header>
+<p id="link" class="status muted">Connecting&hellip;</p>
+
+<main class="grid">
+  <div class="card"><div class="label">Temperature</div><div class="v" id="temp">--</div><span class="unit">&deg;C</span></div>
+  <div class="card"><div class="label">Humidity</div><div class="v" id="hum">--</div><span class="unit">%</span></div>
+  <div class="card"><div class="label">Motion</div><div class="v" id="motion">NORMAL</div></div>
+  <div class="card"><div class="label">Speed</div><div class="v" id="speed">--</div><span class="unit">km/h</span></div>
+  <div class="card"><div class="label">Longitudinal accel (X)</div><div class="v" id="ax">--</div><span class="unit">g</span></div>
+  <div class="card"><div class="label">Gyroscope (X)</div><div class="v" id="gx">--</div><span class="unit">&deg;/s</span></div>
+  <div class="card"><div class="label">Dynamic acceleration</div><div class="v" id="dyn">--</div><span class="unit">g</span></div>
+  <div class="card"><div class="label">Air quality (MQ-135)</div><div class="v" id="air">--</div><span id="airsub" class="muted"></span></div>
+
+  <div class="card wide">
+    <div class="label">Trip safety</div>
+    <p id="trip" class="v small">--</p>
+    <p id="loc" class="muted"></p>
+  </div>
+
+  <div class="card wide">
+    <div class="label">Alert history</div>
+    <ul class="alerts" id="alerts"><li class="muted">No alerts yet</li></ul>
+  </div>
+</main>
+
+<script src="js/app.js"></script>
+</body>
+</html>
