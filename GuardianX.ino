@@ -1,13 +1,4 @@
-/*
- GuardianX integrated firmware: MPU-6050 + DHT22 + MQ-135 + NEO-6M + Wi-Fi dashboards.
- MPU: SDA GPIO8, SCL GPIO9. DHT22 DATA GPIO4. MQ-135 AO GPIO5 (VCC 3.3V). GPS TX->ESP32 GPIO16; GPS RX->GPIO17.
- AP: GuardianX / guardian123
-   normal dashboard  http://192.168.4.1
-   admin dashboard   http://192.168.4.1/admin
- Static UI files (index.html, admin.html, css/, js/) live in the sketch "data/"
- folder and are served from LittleFS. OOP/DSA concepts live in GuardianXDsa.h.
- Required libraries: DHTesp and TinyGPSPlus; ESP32 Arduino core.
-*/
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -18,20 +9,17 @@
 const char* SSID = "GuardianX"; const char* PASS = "guardian123";
 WebServer server(80);
 
-// ---- Concrete sensors: subclasses of Sensor (inheritance) ----
 MpuSensor mpu;
 DhtSensor dhtSensor;
 Mq135Sensor mqSensor;
 GpsSensor gpsSensor;
 
-// ---- Polymorphic dispatch: handled only through the Sensor base class ----
 Sensor* sensors[] = { &mpu, &dhtSensor, &mqSensor, &gpsSensor };
 
-// ---- Data structures (templates + linked list) ----
-RingBuffer<float, 20> dynWindow;   // sliding window for the moving-average filter
-RingBuffer<float, 20> gzWindow;    // sliding window for average yaw rate
-LinkedQueue<Alert, 12> alertQueue; // alert history: singly linked FIFO queue
-DoublyLinkedList<Location, 32> routeTrack; // GPS route: every distinct location reported
+RingBuffer<float, 20> dynWindow;   
+RingBuffer<float, 20> gzWindow;   
+LinkedQueue<Alert, 12> alertQueue; 
+DoublyLinkedList<Location, 32> routeTrack; 
 double lastRouteLat = 0, lastRouteLon = 0;
 bool haveRouteLast = false;
 
@@ -47,7 +35,7 @@ void addAlert(const char* msg, uint8_t sev){
   strncpy(a.msg, msg, sizeof(a.msg) - 1); a.msg[sizeof(a.msg) - 1] = 0;
   alertQueue.push(a);
 }
-// Cool-down guard: one physical event -> at most one alert per window.
+
 void fireAlert(int id, const char* msg, uint8_t sev){
   if (lastFire[id] != 0 && millis() - lastFire[id] < ALERT_COOLDOWN_MS) return;
   addAlert(msg, sev);
@@ -58,7 +46,7 @@ float windowAvg(const RingBuffer<float, 20>& b){
   float s = 0; for (size_t i = 0; i < b.size(); i++) s += b[i];
   return s / b.size();
 }
-// Great-circle distance (metres) between two GPS points.
+
 double metersBetween(double lat1, double lon1, double lat2, double lon2){
   const double R = 6371000.0, D2R = 0.017453292519943295;
   double dLat = (lat2 - lat1) * D2R, dLon = (lon2 - lon1) * D2R;
@@ -145,13 +133,11 @@ void updateAlerts(){
 void setup(){
   Serial.begin(115200); delay(500);
   for (Sensor* s : sensors) Serial.printf("%s: %s\n", s->name(), s->begin() ? "OK" : "NOT DETECTED");
-  // Demo route nodes so the /admin route card has something to show.
   routeTrack.push_back(Location{ 0, 13.352500, 74.793200, "test1loc" });
   routeTrack.push_back(Location{ 0, 13.353100, 74.794000, "test2loc" });
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
   else if (!LittleFS.exists("/index.html")) Serial.println("WARNING: /index.html missing - flash the data/ folder (see README).");
   WiFi.mode(WIFI_AP); WiFi.softAP(SSID, PASS);
-  // Register exact routes BEFORE the static catch-all (first match wins).
   server.on("/", HTTP_GET, root);
   server.on("/admin", HTTP_GET, adminPage);
   server.on("/data", HTTP_GET, data);
