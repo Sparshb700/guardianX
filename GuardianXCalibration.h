@@ -1,5 +1,4 @@
 #pragma once
-// Previously measured offsets for this specific MPU-6050 installation.
 static constexpr float ACCEL_X_OFFSET = -1669.97f;
 static constexpr float ACCEL_Y_OFFSET = -552.78f;
 static constexpr float ACCEL_Z_OFFSET = 2096.36f;
