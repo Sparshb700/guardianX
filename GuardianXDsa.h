@@ -1,21 +1,4 @@
 #pragma once
-/*
- GuardianX DSA/OOP module.
-
- Concepts demonstrated (for the report / viva):
-   1. Class inheritance + polymorphism : Sensor base class, with MpuSensor,
-      DhtSensor, Mq135Sensor and GpsSensor subclasses. The main sketch holds
-      Sensor* pointers and calls begin()/update() virtually, so it never needs
-      to know the concrete type.
-   2. Templates                        : RingBuffer<T,N>, a fixed-capacity ring
-      used as a sliding window for the moving-average acceleration filter.
-   3. Linked list / queue              : LinkedQueue<T,N>, a singly linked list
-      used as a bounded FIFO for the alert history (newest at tail, oldest
-      trimmed from head).
-   4. Doubly linked list               : DoublyLinkedList<T,N> records the GPS
-      route: every distinct location the NEO-6M reports becomes a node with
-      prev/next links.
-*/
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
@@ -24,7 +7,6 @@
 #include <TinyGPSPlus.h>
 #include "GuardianXCalibration.h"
 
-// ---- Frozen pins and safety thresholds (tune from real test-drive data) ----
 static const uint8_t MPU_ADDR = 0x68;
 static const int PIN_SDA = 8, PIN_SCL = 9, PIN_DHT = 4, PIN_MQ = 5, PIN_GPS_RX = 16, PIN_GPS_TX = 17;
 static const float SPEED_LIMIT_KMPH = 50.0f, SHOCK_G = 0.45f, IMPACT_G = 0.80f, TURN_DPS = 90.0f, TEMP_WARN = 35.0f, TEMP_URGENT = 40.0f;
@@ -34,9 +16,6 @@ static const unsigned long MQ_WARMUP_MS = 120000; // baseline warm-up (VCC 3.3V:
 static const float MQ_ALERT_PCT = 25.0f;
 static const double ROUTE_MIN_METERS = 10.0; // record a new route waypoint after this much movement
 
-// ============================================================================
-// DSA 1: generic fixed-capacity ring buffer (template)
-// ============================================================================
 template <typename T, size_t N>
 class RingBuffer {
 public:
@@ -51,9 +30,6 @@ private:
   size_t head = 0, count = 0;
 };
 
-// ============================================================================
-// DSA 2: singly linked list used as a bounded FIFO queue
-// ============================================================================
 template <typename T>
 struct ListNode { T value; ListNode* next; };
 
@@ -84,9 +60,6 @@ private:
 
 struct Alert { uint32_t t; uint8_t sev; char msg[44]; };
 
-// ============================================================================
-// DSA 3: doubly linked list used to track the GPS route
-// ============================================================================
 struct Location { uint32_t t; double lat, lon; const char* label; };
 
 template <typename T>
@@ -117,9 +90,6 @@ private:
   size_t count = 0;
 };
 
-// ============================================================================
-// DSA 4: class inheritance + polymorphism
-// ============================================================================
 class Sensor {
 public:
   virtual ~Sensor() {}
