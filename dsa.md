@@ -1,12 +1,8 @@
-# GuardianX — DSA Highlights
-
-Small reference of the OOP/DSA used in the GuardianX firmware (`GuardianX.ino` + `GuardianXDsa.h`):
+# GuardianX DSA
 
 1. Class inheritance & polymorphism
 2. Linked list — alert queue
 3. Doubly linked list — GPS route tracking
-
----
 
 ## 1. Class inheritance
 
@@ -39,8 +35,6 @@ Sensor* sensors[] = { &mpu, &dhtSensor, &mqSensor, &gpsSensor };
 for (Sensor* s : sensors) s->update();
 ```
 
----
-
 ## 2. Linked list — alert queue
 
 A singly linked list as a bounded FIFO: append at the tail, drop the oldest from the head.
@@ -63,7 +57,7 @@ class LinkedQueue {
 };
 ```
 
-Usage — the alert history (capped at 12):
+the alert history
 
 ```cpp
 // GuardianXDsa.h:85
@@ -119,9 +113,6 @@ Usage:
 // GuardianX.ino:34
 DoublyLinkedList<Location, 32> routeTrack;
 
-// GuardianX.ino:149  -- demo nodes (for showing the route card before a GPS fix)
-routeTrack.push_back(Location{ 0, 13.352500, 74.793200, "test1loc" });
-routeTrack.push_back(Location{ 0, 13.353100, 74.794000, "test2loc" });
 
 // GuardianX.ino:171  -- real waypoint, added only after moving >= ROUTE_MIN_METERS
 routeTrack.push_back(Location{ millis() / 1000, gpsSensor.lat, gpsSensor.lon, "GPS" });
@@ -131,5 +122,4 @@ const DListNode<Location>* rn = routeTrack.begin();
 while (rn) { /* rn->value.lat, rn->value.lon, rn->value.label */ rn = rn->next; }
 ```
 
-Shown on the admin dashboard (`http://192.168.4.1/admin`) as the
-"Route track (doubly linked list)" card, and exposed as `routeCount` / `route[]` in `/admin/data`.
+Shown on the admin dashboard (`http://192.168.4.1/admin`)
