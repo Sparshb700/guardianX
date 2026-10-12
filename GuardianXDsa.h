@@ -11,82 +11,100 @@ static const uint8_t MPU_ADDR = 0x68;
 static const int PIN_SDA = 8, PIN_SCL = 9, PIN_DHT = 4, PIN_MQ = 5, PIN_GPS_RX = 16, PIN_GPS_TX = 17;
 static const float SPEED_LIMIT_KMPH = 50.0f, SHOCK_G = 0.45f, IMPACT_G = 0.80f, TURN_DPS = 90.0f, TEMP_WARN = 35.0f, TEMP_URGENT = 40.0f;
 static const float TURN_MIN_KMPH = 5.0f;                 // sharp turn only matters while moving
-static const unsigned long ALERT_COOLDOWN_MS = 10000;    // one alert per event, no repeats
-static const unsigned long MQ_WARMUP_MS = 120000; // baseline warm-up (VCC 3.3V: relative trend only)
+static const unsigned long ALERT_COOLDOWN_MS = 10000;    // one alert per event
+static const unsigned long MQ_WARMUP_MS = 120000; // baseline warm-up 
 static const float MQ_ALERT_PCT = 25.0f;
 static const double ROUTE_MIN_METERS = 10.0; // record a new route waypoint after this much movement
 
-template <typename T, size_t N>
-class RingBuffer {
+static const size_t RING_CAPACITY    = 64;   // FloatRingBuffer
+static const size_t ALERT_QUEUE_MAX  = 20;   // AlertQueue
+static const size_t ROUTE_MAX_POINTS = 100;  // LocationList
+
+class Alert {
 public:
-  void push(const T& v){ buf[head] = v; head = (head + 1) % N; if (count < N) count++; }
+  uint32_t t;
+  uint8_t sev;
+  char msg[44];
+};
+
+class Location {
+public:
+  uint32_t t;
+  double lat, lon;
+  const char* label;
+};
+
+class FloatRingBuffer {
+public:
+  void push(const float& v){ buf[head] = v; head = (head + 1) % RING_CAPACITY; if (count < RING_CAPACITY) count++; }
   size_t size() const { return count; }
-  size_t capacity() const { return N; }
+  size_t capacity() const { return RING_CAPACITY; }
   bool empty() const { return count == 0; }
   void clear(){ head = 0; count = 0; }
-  const T& operator[](size_t i) const { return buf[(head - count + i + N) % N]; }
+  const float& operator[](size_t i) const { return buf[(head - count + i + RING_CAPACITY) % RING_CAPACITY]; }
 private:
-  T buf[N];
+  float buf[RING_CAPACITY];
   size_t head = 0, count = 0;
 };
 
-template <typename T>
-struct ListNode { T value; ListNode* next; };
-
-template <typename T, size_t MAXITEMS>
-class LinkedQueue {
+class AlertNode {
 public:
-  ~LinkedQueue(){ clear(); }
+  Alert value;
+  AlertNode* next;
+};
+
+class AlertQueue {
+public:
+  ~AlertQueue(){ clear(); }
   void clear(){
-    ListNode<T>* p = head;
-    while (p) { ListNode<T>* n = p->next; delete p; p = n; }
+    AlertNode* p = head;
+    while (p) { AlertNode* n = p->next; delete p; p = n; }
     head = tail = nullptr; count = 0;
   }
-  bool push(const T& v){
-    ListNode<T>* n = new ListNode<T>{ v, nullptr };
+  bool push(const Alert& v){
+    AlertNode* n = new AlertNode{ v, nullptr };
     if (!n) return false;
     if (tail) tail->next = n; else head = n;
     tail = n; count++;
-    if (count > MAXITEMS) { ListNode<T>* old = head; head = head->next; delete old; count--; }
+    if (count > ALERT_QUEUE_MAX) { AlertNode* old = head; head = head->next; delete old; count--; }
     return true;
   }
   size_t size() const { return count; }
-  const ListNode<T>* begin() const { return head; }
+  const AlertNode* begin() const { return head; }
 private:
-  ListNode<T>* head = nullptr;
-  ListNode<T>* tail = nullptr;
+  AlertNode* head = nullptr;
+  AlertNode* tail = nullptr;
   size_t count = 0;
 };
 
-struct Alert { uint32_t t; uint8_t sev; char msg[44]; };
-
-struct Location { uint32_t t; double lat, lon; const char* label; };
-
-template <typename T>
-struct DListNode { T value; DListNode* prev; DListNode* next; };
-
-template <typename T, size_t MAXITEMS>
-class DoublyLinkedList {
+class LocationNode {
 public:
-  ~DoublyLinkedList(){ clear(); }
+  Location value;
+  LocationNode* prev;
+  LocationNode* next;
+};
+
+class LocationList {
+public:
+  ~LocationList(){ clear(); }
   void clear(){
-    DListNode<T>* p = head;
-    while (p) { DListNode<T>* n = p->next; delete p; p = n; }
+    LocationNode* p = head;
+    while (p) { LocationNode* n = p->next; delete p; p = n; }
     head = tail = nullptr; count = 0;
   }
-  void push_back(const T& v){
-    DListNode<T>* n = new DListNode<T>{ v, tail, nullptr };
+  void push_back(const Location& v){
+    LocationNode* n = new LocationNode{ v, tail, nullptr };
     if (!n) return;
     if (tail) tail->next = n; else head = n;
     tail = n; count++;
-    if (count > MAXITEMS) { DListNode<T>* old = head; head = head->next; head->prev = nullptr; delete old; count--; }
+    if (count > ROUTE_MAX_POINTS) { LocationNode* old = head; head = head->next; head->prev = nullptr; delete old; count--; }
   }
   size_t size() const { return count; }
-  const DListNode<T>* begin() const { return head; }
-  const DListNode<T>* back() const { return tail; }
+  const LocationNode* begin() const { return head; }
+  const LocationNode* back() const { return tail; }
 private:
-  DListNode<T>* head = nullptr;
-  DListNode<T>* tail = nullptr;
+  LocationNode* head = nullptr;
+  LocationNode* tail = nullptr;
   size_t count = 0;
 };
 
