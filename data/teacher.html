@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080807">
+<title>GuardianAngel Teacher</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="teacher">
+<header>
+  <h1>
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2.5 19 5.5v5.7c0 4.6-2.9 7.8-7 9.3-4.1-1.5-7-4.7-7-9.3V5.5l7-3Z"/>
+        <path d="m8.6 11.8 2.2 2.2 4.4-4.5"/>
+      </svg>
+    </span>
+    <span class="brand-name">GuardianAngel</span>
+    <span class="muted tag">teacher</span>
+  </h1>
+  <nav>
+    <a href="/">Parent</a>
+    <button id="themeToggle" class="theme-toggle" type="button">Gold &amp; White</button>
+  </nav>
+</header>
+<p id="link" class="status muted">Connecting&hellip;</p>
+
+<main class="teacher-main">
+  <div class="card teacher-card" id="card">
+    <div class="label">School status</div>
+    <p id="status" class="teacher-status">Checking&hellip;</p>
+    <button id="arrive" class="big-btn" type="button">Child has reached school safely</button>
+    <button id="sent" class="big-btn secondary" type="button" disabled>Child has been sent back from school</button>
+  </div>
+</main>
+
+<script src="js/theme.js"></script>
+<script src="js/teacher.js"></script>
+</body>
+</html>

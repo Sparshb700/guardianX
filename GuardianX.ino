@@ -1,4 +1,3 @@
-
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
@@ -6,7 +5,7 @@
 #include <math.h>
 #include "GuardianXDsa.h"
 
-const char* SSID = "GuardianX"; const char* PASS = "guardian123";
+const char* SSID = "GuardianAngel"; const char* PASS = "guardian123";
 WebServer server(80);
 
 MpuSensor mpu;
@@ -16,26 +15,35 @@ GpsSensor gpsSensor;
 
 Sensor* sensors[] = { &mpu, &dhtSensor, &mqSensor, &gpsSensor };
 
-RingBuffer<float, 20> dynWindow;   
-RingBuffer<float, 20> gzWindow;   
-LinkedQueue<Alert, 12> alertQueue; 
-DoublyLinkedList<Location, 32> routeTrack; 
+RingBuffer<float, 20> dynWindow;
+RingBuffer<float, 20> gzWindow;
+LinkedQueue<Alert, 12> alertQueue;
+DoublyLinkedList<Location, 32> routeTrack;
 double lastRouteLat = 0, lastRouteLon = 0;
 bool haveRouteLast = false;
 
-enum AlertId { A_SHOCK, A_TURN, A_OVER, A_TWARN, A_TURGENT, A_AIR, A_COUNT };
+enum AlertId { A_SHOCK, A_CRASH, A_FLIP, A_TURN, A_OVER, A_TWARN, A_TURGENT, A_AIR, A_COUNT };
 unsigned long lastFire[A_COUNT] = { 0 };
-bool prevShock = false, prevTurn = false, prevOver = false, prevWarn = false, prevUrgent = false, prevAir = false;
-float eventPeak = 0;                 // peak dynamicG within the current shock event
+bool prevShock = false, prevFlip = false, prevTurn = false, prevOver = false, prevWarn = false, prevUrgent = false, prevAir = false;
+bool alertsArmed = false;
+float eventPeak = 0;
 bool overspeed = false, sharpTurn = false;
 unsigned long lastPrint = 0;
+bool crashLatched = false;
+unsigned long crashLatchedAt = 0;
+
+bool crashActive(){
+  return crashLatched && (millis() - crashLatchedAt < 15000);
+}
+
+bool arrivedSafe = false, sentBack = false, homeSafe = false;
+uint32_t arrivedAt = 0, sentAt = 0, homeAt = 0;
 
 void addAlert(const char* msg, uint8_t sev){
   Alert a; a.t = (uint32_t)(millis() / 1000); a.sev = sev;
   strncpy(a.msg, msg, sizeof(a.msg) - 1); a.msg[sizeof(a.msg) - 1] = 0;
   alertQueue.push(a);
 }
-
 void fireAlert(int id, const char* msg, uint8_t sev){
   if (lastFire[id] != 0 && millis() - lastFire[id] < ALERT_COOLDOWN_MS) return;
   addAlert(msg, sev);
@@ -46,7 +54,6 @@ float windowAvg(const RingBuffer<float, 20>& b){
   float s = 0; for (size_t i = 0; i < b.size(); i++) s += b[i];
   return s / b.size();
 }
-
 double metersBetween(double lat1, double lon1, double lat2, double lon2){
   const double R = 6371000.0, D2R = 0.017453292519943295;
   double dLat = (lat2 - lat1) * D2R, dLon = (lon2 - lon1) * D2R;
@@ -60,22 +67,51 @@ void serveFile(const char* path, const char* type){
   server.streamFile(f, type);
   f.close();
 }
-void adminPage(){ serveFile("/admin.html", "text/html"); }
 void root(){ serveFile("/index.html", "text/html"); }
+void teacherPage(){ serveFile("/teacher.html", "text/html"); }
+void demoPage(){ serveFile("/demo.html", "text/html"); }
 
 void data(){
+  bool smoking = mqSensor.baselineReady && mqSensor.airQualityBad;
+  bool hot = dhtSensor.valid && dhtSensor.tempC >= TEMP_HOT;
+  bool cold = dhtSensor.valid && dhtSensor.tempC < TEMP_COLD;
+  bool tooHot = dhtSensor.valid && dhtSensor.tempC >= TEMP_TOO_HOT;
+  bool tooCold = dhtSensor.valid && dhtSensor.tempC <= TEMP_TOO_COLD;
+  bool crash = mpu.crash || crashActive();
+  bool problem = mpu.shock || crash || mpu.flipped || overspeed || sharpTurn || smoking || hot || cold;
+
   String s = "{";
   s += "\"temperature\":" + (dhtSensor.valid ? String(dhtSensor.tempC, 2) : String("null"));
   s += ",\"humidity\":" + (dhtSensor.valid ? String(dhtSensor.humidity, 2) : String("null"));
-  s += ",\"ax\":" + String(mpu.ax, 4) + ",\"gx\":" + String(mpu.gx, 3);
-  s += ",\"dynamicAcceleration\":" + String(mpu.dynamicG, 4) + ",\"dynamicAverage\":" + String(windowAvg(dynWindow), 4);
-  s += ",\"motion\":\"" + String(mpu.shock ? "JOLT DETECTED" : "NORMAL") + "\"";
-  s += ",\"shock\":" + String(mpu.shock ? "true" : "false") + ",\"impact\":" + String(mpu.impact ? "true" : "false");
+  s += ",\"tempTooCold\":" + String(TEMP_TOO_COLD, 1) + ",\"tempCold\":" + String(TEMP_COLD, 1);
+  s += ",\"tempHot\":" + String(TEMP_HOT, 1) + ",\"tempTooHot\":" + String(TEMP_TOO_HOT, 1);
+  s += ",\"smoking\":" + String(smoking ? "true" : "false") + ",\"smokingKnown\":" + String(mqSensor.baselineReady ? "true" : "false");
+  s += ",\"harshDriving\":" + String(mpu.shock ? "true" : "false") + ",\"impact\":" + String(mpu.impact ? "true" : "false");
+  s += ",\"flipped\":" + String(mpu.flipped ? "true" : "false") + ",\"crash\":" + String(crash ? "true" : "false");
   s += ",\"overspeed\":" + String(overspeed ? "true" : "false") + ",\"sharpTurn\":" + String(sharpTurn ? "true" : "false");
-  s += ",\"mqVolt\":" + String(mqSensor.volt, 3) + ",\"mqTrendPct\":" + String(mqSensor.trendPct, 2) + ",\"mqBaselineReady\":" + String(mqSensor.baselineReady ? "true" : "false") + ",\"airQualityBad\":" + String(mqSensor.airQualityBad ? "true" : "false");
+  s += ",\"problem\":" + String(problem ? "true" : "false") + ",\"problems\":[";
+  bool firstP = true;
+  auto addProblem = [&](const char* msg){
+    if (!firstP) s += ","; firstP = false;
+    s += "\""; s += msg; s += "\"";
+  };
+  if (mpu.flipped) addProblem("Car flipped - high crash risk");
+  if (crash) addProblem("Crash detected");
+  if (mpu.impact) addProblem("Sudden bump or hard impact");
+  else if (mpu.shock) addProblem("Sudden braking or speeding up");
+  if (overspeed) addProblem("Vehicle is going too fast");
+  if (sharpTurn) addProblem("Sharp turn taken");
+  if (smoking) addProblem("Smoke detected in the car");
+  if (tooHot) addProblem("Car is too hot");
+  else if (hot) addProblem("Car is hot");
+  if (tooCold) addProblem("Car is too cold");
+  else if (cold) addProblem("Car is cold");
+  s += "]";
   s += ",\"gpsValid\":" + String(gpsSensor.valid ? "true" : "false") + ",\"latitude\":" + String(gpsSensor.lat, 6) + ",\"longitude\":" + String(gpsSensor.lon, 6);
   s += ",\"speedKmph\":" + String(gpsSensor.speed, 2) + ",\"satellites\":" + String(gpsSensor.sats);
-  s += ",\"routeCount\":" + String(routeTrack.size());
+  s += ",\"arrived\":" + String(arrivedSafe ? "true" : "false") + ",\"arrivedAt\":" + String(arrivedAt);
+  s += ",\"sentBack\":" + String(sentBack ? "true" : "false") + ",\"sentAt\":" + String(sentAt);
+  s += ",\"homeSafe\":" + String(homeSafe ? "true" : "false") + ",\"homeAt\":" + String(homeAt);
   s += ",\"alerts\":[";
   const ListNode<Alert>* n = alertQueue.begin(); bool first = true;
   while (n) { if (!first) s += ","; first = false; s += "{\"t\":" + String(n->value.t) + ",\"sev\":" + String(n->value.sev) + ",\"msg\":\"" + String(n->value.msg) + "\"}"; n = n->next; }
@@ -83,50 +119,78 @@ void data(){
   server.send(200, "application/json", s);
 }
 
-void adminData(){
+void teacherData(){
   String s = "{";
-  s += "\"ax\":" + String(mpu.ax, 4) + ",\"ay\":" + String(mpu.ay, 4) + ",\"az\":" + String(mpu.az, 4);
-  s += ",\"gx\":" + String(mpu.gx, 3) + ",\"gy\":" + String(mpu.gy, 3) + ",\"gz\":" + String(mpu.gz, 3);
-  s += ",\"totalAcceleration\":" + String(mpu.totalG, 4) + ",\"dynamicAcceleration\":" + String(mpu.dynamicG, 4) + ",\"dynamicAverage\":" + String(windowAvg(dynWindow), 4) + ",\"yawAverage\":" + String(windowAvg(gzWindow), 2);
-  s += ",\"temperature\":" + (dhtSensor.valid ? String(dhtSensor.tempC, 2) : String("null"));
-  s += ",\"humidity\":" + (dhtSensor.valid ? String(dhtSensor.humidity, 2) : String("null"));
-  s += ",\"mqRaw\":" + String(mqSensor.raw) + ",\"mqVolt\":" + String(mqSensor.volt, 4) + ",\"mqBaseline\":" + String(mqSensor.baseline, 1) + ",\"mqTrendPct\":" + String(mqSensor.trendPct, 2) + ",\"mqBaselineReady\":" + String(mqSensor.baselineReady ? "true" : "false") + ",\"airQualityBad\":" + String(mqSensor.airQualityBad ? "true" : "false");
-  s += ",\"gpsValid\":" + String(gpsSensor.valid ? "true" : "false") + ",\"latitude\":" + String(gpsSensor.lat, 6) + ",\"longitude\":" + String(gpsSensor.lon, 6) + ",\"speedKmph\":" + String(gpsSensor.speed, 2) + ",\"satellites\":" + String(gpsSensor.sats);
-  s += ",\"overspeed\":" + String(overspeed ? "true" : "false") + ",\"shock\":" + String(mpu.shock ? "true" : "false") + ",\"impact\":" + String(mpu.impact ? "true" : "false") + ",\"sharpTurn\":" + String(sharpTurn ? "true" : "false");
-  s += ",\"uptimeMs\":" + String(millis()) + ",\"freeHeap\":" + String(ESP.getFreeHeap()) + ",\"wifiClients\":" + String(WiFi.softAPgetStationNum());
-  s += ",\"sensors\":{\"mpu\":" + String(mpu.present ? "true" : "false") + ",\"dht\":" + String(dhtSensor.present ? "true" : "false") + ",\"mq\":" + String(mqSensor.present ? "true" : "false") + ",\"gps\":" + String(gpsSensor.present ? "true" : "false") + "}";
-  s += ",\"thresholds\":{\"speed\":" + String(SPEED_LIMIT_KMPH, 1) + ",\"shock\":" + String(SHOCK_G, 2) + ",\"impact\":" + String(IMPACT_G, 2) + ",\"turn\":" + String(TURN_DPS, 0) + ",\"tempWarn\":" + String(TEMP_WARN, 0) + ",\"tempUrgent\":" + String(TEMP_URGENT, 0) + ",\"mqPct\":" + String(MQ_ALERT_PCT, 0) + "}";
-  s += ",\"dynWindow\":[";
-  for (size_t i = 0; i < dynWindow.size(); i++) { if (i) s += ","; s += String(dynWindow[i], 3); }
-  s += "],\"gzWindow\":[";
-  for (size_t i = 0; i < gzWindow.size(); i++) { if (i) s += ","; s += String(gzWindow[i], 1); }
-  s += "],\"routeCount\":" + String(routeTrack.size()) + ",\"route\":[";
-  const DListNode<Location>* rn = routeTrack.begin(); bool firstR = true;
-  while (rn) { if (!firstR) s += ","; firstR = false; s += "{\"t\":" + String(rn->value.t) + ",\"lat\":" + String(rn->value.lat, 6) + ",\"lon\":" + String(rn->value.lon, 6) + ",\"label\":\"" + String(rn->value.label) + "\"}"; rn = rn->next; }
-  s += "],\"alerts\":[";
-  const ListNode<Alert>* n = alertQueue.begin(); bool first = true;
-  while (n) { if (!first) s += ","; first = false; s += "{\"t\":" + String(n->value.t) + ",\"sev\":" + String(n->value.sev) + ",\"msg\":\"" + String(n->value.msg) + "\"}"; n = n->next; }
-  s += "]}";
+  s += "\"arrived\":" + String(arrivedSafe ? "true" : "false");
+  s += ",\"arrivedAt\":" + String(arrivedAt);
+  s += ",\"sentBack\":" + String(sentBack ? "true" : "false");
+  s += ",\"sentAt\":" + String(sentAt);
+  s += ",\"homeSafe\":" + String(homeSafe ? "true" : "false");
+  s += ",\"homeAt\":" + String(homeAt);
+  s += "}";
   server.send(200, "application/json", s);
 }
 
-// One physical jolt -> exactly one alert, classified by the peak it reached.
+void markArrived(){
+  if (!arrivedSafe) { arrivedSafe = true; arrivedAt = (uint32_t)(millis() / 1000); }
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void markSentBack(){
+  if (!arrivedSafe) { server.send(409, "application/json", "{\"ok\":false,\"error\":\"not arrived\"}"); return; }
+  if (!sentBack) { sentBack = true; sentAt = (uint32_t)(millis() / 1000); }
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void markHomeSafe(){
+  if (!sentBack) { server.send(409, "application/json", "{\"ok\":false,\"error\":\"not sent back\"}"); return; }
+  if (!homeSafe) { homeSafe = true; homeAt = (uint32_t)(millis() / 1000); }
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
+void resetTrip(){
+  arrivedSafe = sentBack = homeSafe = false;
+  arrivedAt = sentAt = homeAt = 0;
+  server.send(200, "application/json", "{\"ok\":true}");
+}
+
 void updateAlerts(){
   bool turnNow = sharpTurn;
+  bool flipNow = mpu.flipped;
+  bool warnNow = dhtSensor.valid && dhtSensor.tempC >= TEMP_HOT;
+  bool urgentNow = dhtSensor.valid && dhtSensor.tempC >= TEMP_TOO_HOT;
+
+  if (!alertsArmed) {
+    prevShock = mpu.shock; prevFlip = flipNow; prevTurn = turnNow; prevOver = overspeed;
+    prevWarn = warnNow; prevUrgent = urgentNow; prevAir = mqSensor.airQualityBad;
+    eventPeak = 0;
+    if (millis() >= ALERT_STARTUP_MS && !mpu.shock && !flipNow && !turnNow && !overspeed) {
+      mpu.captureUpright();
+      alertsArmed = true;
+    }
+    return;
+  }
+
   if (mpu.shock) eventPeak = max(eventPeak, mpu.dynamicG);
   if (!mpu.shock && prevShock) {
-    if (eventPeak > IMPACT_G) fireAlert(A_SHOCK, "Impact / jolt detected", 2);
-    else fireAlert(A_SHOCK, "Harsh braking / acceleration", 1);
+    if (eventPeak > CRASH_G) {
+      fireAlert(A_CRASH, "Crash detected", 3);
+      crashLatched = true; crashLatchedAt = millis();
+    } else if (eventPeak > IMPACT_G) {
+      fireAlert(A_SHOCK, "Sudden bump or hard impact", 2);
+    } else {
+      fireAlert(A_SHOCK, "Sudden braking or speeding up", 1);
+    }
     eventPeak = 0;
   }
-  if (overspeed && !prevOver) fireAlert(A_OVER, "Overspeed above limit", 2);
-  if (turnNow && !prevTurn) fireAlert(A_TURN, "Sharp turn detected", 1);
-  if (dhtSensor.valid && dhtSensor.tempC >= TEMP_WARN && !prevWarn) fireAlert(A_TWARN, "Cabin temperature warning", 1);
-  if (dhtSensor.valid && dhtSensor.tempC >= TEMP_URGENT && !prevUrgent) fireAlert(A_TURGENT, "Cabin temperature urgent", 2);
-  if (mqSensor.airQualityBad && !prevAir) fireAlert(A_AIR, "Air quality rising", 1);
-  prevShock = mpu.shock; prevTurn = turnNow; prevOver = overspeed;
-  prevWarn = dhtSensor.valid && dhtSensor.tempC >= TEMP_WARN;
-  prevUrgent = dhtSensor.valid && dhtSensor.tempC >= TEMP_URGENT;
+  if (flipNow && !prevFlip) fireAlert(A_FLIP, "Car flipped - high crash risk", 2);
+  if (overspeed && !prevOver) fireAlert(A_OVER, "Vehicle is going too fast", 2);
+  if (turnNow && !prevTurn) fireAlert(A_TURN, "Sharp turn taken", 1);
+  if (warnNow && !prevWarn) fireAlert(A_TWARN, "Car is too hot", 1);
+  if (urgentNow && !prevUrgent) fireAlert(A_TURGENT, "Car is dangerously hot", 2);
+  if (mqSensor.airQualityBad && !prevAir) fireAlert(A_AIR, "Smoke detected in the car", 1);
+  prevShock = mpu.shock; prevFlip = flipNow; prevTurn = turnNow; prevOver = overspeed;
+  prevWarn = warnNow; prevUrgent = urgentNow;
   prevAir = mqSensor.airQualityBad;
 }
 
@@ -137,21 +201,29 @@ void setup(){
   routeTrack.push_back(Location{ 0, 13.353100, 74.794000, "test2loc" });
   if (!LittleFS.begin(true)) Serial.println("LittleFS mount failed");
   else if (!LittleFS.exists("/index.html")) Serial.println("WARNING: /index.html missing - flash the data/ folder (see README).");
-  WiFi.mode(WIFI_AP); WiFi.softAP(SSID, PASS);
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(SSID, PASS);
+
   server.on("/", HTTP_GET, root);
-  server.on("/admin", HTTP_GET, adminPage);
+  server.on("/teacher", HTTP_GET, teacherPage);
+  server.on("/demo", HTTP_GET, demoPage);
   server.on("/data", HTTP_GET, data);
-  server.on("/admin/data", HTTP_GET, adminData);
+  server.on("/teacher/data", HTTP_GET, teacherData);
+  server.on("/teacher/arrive", HTTP_GET, markArrived);
+  server.on("/teacher/sent", HTTP_GET, markSentBack);
+  server.on("/parent/home", HTTP_GET, markHomeSafe);
+  server.on("/parent/reset", HTTP_GET, resetTrip);
   server.serveStatic("/", LittleFS, "/");
   server.begin();
-  Serial.print("Wi-Fi GuardianX; dashboard http://"); Serial.print(WiFi.softAPIP());
-  Serial.println("  admin /admin");
+  Serial.print("Wi-Fi GuardianAngel; parent http://"); Serial.print(WiFi.softAPIP());
+  Serial.println("  teacher /teacher");
   Serial.printf("MQ-135 on GPIO%d; warming up %lus before baseline.\n", PIN_MQ, MQ_WARMUP_MS / 1000);
 }
 
 void loop(){
   server.handleClient();
-  for (Sensor* s : sensors) s->update();           // polymorphic update of every sensor
+  for (Sensor* s : sensors) s->update();
   if (mpu.present) { dynWindow.push(mpu.dynamicG); gzWindow.push(mpu.gz); }
   if (gpsSensor.valid && (!haveRouteLast || metersBetween(lastRouteLat, lastRouteLon, gpsSensor.lat, gpsSensor.lon) >= ROUTE_MIN_METERS)) {
     routeTrack.push_back(Location{ (uint32_t)(millis() / 1000), gpsSensor.lat, gpsSensor.lon, "GPS" });
